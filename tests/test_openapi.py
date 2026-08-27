@@ -147,4 +147,5 @@ def test_request_bodies_carry_examples(spec):
 
 def test_put_and_patch_semantics_are_explained(spec):
     assert "cleared" in spec["paths"][ITEM_PATH]["put"]["description"]
+    assert "preserve" in spec["paths"][ITEM_PATH]["put"]["description"]
     assert "omit" in spec["paths"][ITEM_PATH]["patch"]["description"]
