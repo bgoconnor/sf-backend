@@ -1,7 +1,7 @@
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
-from app.models import Contact
+from app.models import Address, Contact
 from app.schemas import ContactCreate, ContactReplace, ContactUpdate
 
 SORTABLE_FIELDS = ("id", "first_name", "last_name", "email", "company", "created_at", "updated_at")
@@ -11,8 +11,19 @@ def _normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
+def _make_addresses(items: list[dict]) -> list[Address]:
+    addresses = []
+    for index, item in enumerate(items):
+        data = dict(item)
+        data["address_type"] = data.pop("type")
+        addresses.append(Address(**data, position=index))
+    return addresses
+
+
 def get_contact(db: Session, contact_id: int) -> Contact | None:
-    return db.get(Contact, contact_id)
+    return db.execute(
+        select(Contact).options(selectinload(Contact.addresses)).where(Contact.id == contact_id)
+    ).scalar_one_or_none()
 
 
 def get_contact_by_email(db: Session, email: str) -> Contact | None:
@@ -34,7 +45,7 @@ def list_contacts(
     order: str = "asc",
 ) -> tuple[list[Contact], int]:
     """Return (page of contacts, total matching count)."""
-    stmt = select(Contact)
+    stmt = select(Contact).options(selectinload(Contact.addresses))
 
     if search:
         pattern = f"%{search.strip().lower()}%"
@@ -61,8 +72,10 @@ def list_contacts(
 
 def create_contact(db: Session, payload: ContactCreate) -> Contact:
     data = payload.model_dump()
+    address_data = data.pop("addresses")
     data["email"] = _normalize_email(data["email"])
     contact = Contact(**data)
+    contact.addresses = _make_addresses(address_data)
     db.add(contact)
     db.commit()
     db.refresh(contact)
@@ -70,18 +83,25 @@ def create_contact(db: Session, payload: ContactCreate) -> Contact:
 
 
 def replace_contact(db: Session, contact: Contact, payload: ContactReplace) -> Contact:
-    for field, value in payload.model_dump().items():
+    data = payload.model_dump()
+    address_data = data.pop("addresses")
+    for field, value in data.items():
         if field == "photo_data_url" and field not in payload.model_fields_set:
             continue
         setattr(contact, field, _normalize_email(value) if field == "email" else value)
+    contact.addresses = _make_addresses(address_data)
     db.commit()
     db.refresh(contact)
     return contact
 
 
 def update_contact(db: Session, contact: Contact, payload: ContactUpdate) -> Contact:
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    address_data = data.pop("addresses", None)
+    for field, value in data.items():
         setattr(contact, field, _normalize_email(value) if field == "email" else value)
+    if address_data is not None:
+        contact.addresses = _make_addresses(address_data)
     db.commit()
     db.refresh(contact)
     return contact
