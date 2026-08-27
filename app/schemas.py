@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field, fie
 
 
 MAX_PHOTO_BYTES = 2 * 1024 * 1024
+MAX_PHOTO_BASE64_CHARS = 4 * ((MAX_PHOTO_BYTES + 2) // 3)
 SUPPORTED_PHOTO_TYPES = ("image/jpeg", "image/png", "image/webp")
 _PHOTO_DATA_URL = re.compile(
     rf"^data:({'|'.join(re.escape(mime) for mime in SUPPORTED_PHOTO_TYPES)});base64,([A-Za-z0-9+/]*={{0,2}})$"
@@ -22,6 +23,8 @@ def _validate_photo_data_url(value: str | None) -> str | None:
         raise ValueError("Photo must be a base64 data URL for a JPEG, PNG, or WebP image")
 
     mime_type, encoded = match.groups()
+    if len(encoded) > MAX_PHOTO_BASE64_CHARS:
+        raise ValueError("Photo must be 2 MiB or smaller")
     try:
         image = base64.b64decode(encoded, validate=True)
     except (binascii.Error, ValueError) as exc:
@@ -117,9 +120,6 @@ class ContactBase(BaseModel):
         examples=["data:image/png;base64,iVBORw0KGgo="],
     )
 
-    _photo_is_valid = field_validator("photo_data_url")(_validate_photo_data_url)
-
-
 _FULL_EXAMPLE = {
     "first_name": "Ada",
     "last_name": "Lovelace",
@@ -142,6 +142,8 @@ class ContactCreate(ContactBase):
 
     model_config = ConfigDict(json_schema_extra={"examples": [_FULL_EXAMPLE, _MINIMAL_EXAMPLE]})
 
+    _photo_is_valid = field_validator("photo_data_url")(_validate_photo_data_url)
+
 
 class ContactReplace(ContactBase):
     """
@@ -152,6 +154,8 @@ class ContactReplace(ContactBase):
     """
 
     model_config = ConfigDict(json_schema_extra={"examples": [_FULL_EXAMPLE]})
+
+    _photo_is_valid = field_validator("photo_data_url")(_validate_photo_data_url)
 
 
 class ContactUpdate(BaseModel):

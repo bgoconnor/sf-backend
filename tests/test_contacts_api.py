@@ -144,6 +144,22 @@ def test_patch_same_email_is_allowed(client, payload):
     assert response.status_code == 200
 
 
+def test_patch_preserves_replaces_and_removes_photo(client, payload):
+    contact_id = client.post(BASE, json={**payload, "photo_data_url": PNG_DATA_URL}).json()["id"]
+
+    preserved = client.patch(f"{BASE}/{contact_id}", json={"phone": "+1-000-000-0000"})
+    assert preserved.status_code == 200
+    assert preserved.json()["photo_data_url"] == PNG_DATA_URL
+
+    replaced = client.patch(f"{BASE}/{contact_id}", json={"photo_data_url": JPEG_DATA_URL})
+    assert replaced.status_code == 200
+    assert replaced.json()["photo_data_url"] == JPEG_DATA_URL
+
+    removed = client.patch(f"{BASE}/{contact_id}", json={"photo_data_url": None})
+    assert removed.status_code == 200
+    assert removed.json()["photo_data_url"] is None
+
+
 def test_put_replaces_contact(client, payload):
     contact_id = client.post(BASE, json=payload).json()["id"]
     response = client.put(
