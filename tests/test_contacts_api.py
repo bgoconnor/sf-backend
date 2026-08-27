@@ -30,6 +30,27 @@ def test_create_and_read_contact_photo(client, payload):
     assert client.get(f"{BASE}/{contact_id}").json()["photo_data_url"] == PNG_DATA_URL
 
 
+def test_create_and_read_multiple_typed_addresses(client, payload):
+    addresses = [
+        {"type": "Home", "street_address": "1 Main St", "city": "Oakland", "state": "CA"},
+        {"type": "Work", "street_address": "2 Market St", "city": "San Francisco", "state": "CA"},
+    ]
+    response = client.post(BASE, json={**payload, "addresses": addresses})
+    assert response.status_code == 201
+    stored = response.json()["addresses"]
+    assert [address["type"] for address in stored] == ["Home", "Work"]
+    assert [address["street_address"] for address in stored] == ["1 Main St", "2 Market St"]
+    assert all(address["id"] > 0 for address in stored)
+
+
+def test_rejects_invalid_address_type(client, payload):
+    response = client.post(
+        BASE,
+        json={**payload, "addresses": [{"type": "Vacation", "street_address": "1 Beach Rd"}]},
+    )
+    assert response.status_code == 422
+
+
 def test_rejects_unsupported_or_mismatched_photo(client, payload):
     unsupported = client.post(
         BASE,
@@ -160,6 +181,41 @@ def test_patch_preserves_replaces_and_removes_photo(client, payload):
     assert removed.json()["photo_data_url"] is None
 
 
+def test_patch_preserves_replaces_and_clears_addresses(client, payload):
+    original = [{"type": "Home", "street_address": "1 Main St"}]
+    contact_id = client.post(BASE, json={**payload, "addresses": original}).json()["id"]
+
+    preserved = client.patch(f"{BASE}/{contact_id}", json={"phone": "+1-000-000-0000"})
+    assert preserved.json()["addresses"][0]["street_address"] == "1 Main St"
+
+    replacement = [{"type": "Other", "street_address": "9 New St"}]
+    replaced = client.patch(f"{BASE}/{contact_id}", json={"addresses": replacement})
+    assert replaced.status_code == 200
+    assert replaced.json()["addresses"][0]["type"] == "Other"
+
+    cleared = client.patch(f"{BASE}/{contact_id}", json={"addresses": []})
+    assert cleared.status_code == 200
+    assert cleared.json()["addresses"] == []
+    assert client.patch(f"{BASE}/{contact_id}", json={"addresses": None}).status_code == 422
+
+
+def test_address_only_patch_updates_contact_timestamp(client, payload):
+    created = client.post(BASE, json=payload).json()
+    response = client.patch(
+        f"{BASE}/{created['id']}",
+        json={"addresses": [{"type": "Work", "street_address": "2 New St"}]},
+    )
+    assert response.status_code == 200
+    assert response.json()["updated_at"] > created["updated_at"]
+
+
+def test_legacy_flat_address_fields_are_rejected(client, payload):
+    payload.pop("addresses")
+    payload["city"] = "San Francisco"
+    response = client.post(BASE, json=payload)
+    assert response.status_code == 422
+
+
 def test_put_replaces_contact(client, payload):
     contact_id = client.post(BASE, json=payload).json()["id"]
     response = client.put(
@@ -170,6 +226,7 @@ def test_put_replaces_contact(client, payload):
     body = response.json()
     assert body["full_name"] == "Grace Hopper"
     assert body["company"] is None  # omitted fields are cleared by PUT
+    assert body["addresses"] == []
 
 
 def test_put_preserves_replaces_and_removes_photo(client, payload):
@@ -202,6 +259,21 @@ def test_delete_contact(client, payload):
     assert client.delete(f"{BASE}/{contact_id}").status_code == 204
     assert client.get(f"{BASE}/{contact_id}").status_code == 404
     assert client.delete(f"{BASE}/{contact_id}").status_code == 404
+
+
+def test_delete_contact_cascades_addresses(client, payload):
+    from sqlalchemy import func, select
+
+    from app.database import SessionLocal
+    from app.models import Address
+
+    contact_id = client.post(
+        BASE,
+        json={**payload, "addresses": [{"type": "Home", "street_address": "1 Main St"}]},
+    ).json()["id"]
+    assert client.delete(f"{BASE}/{contact_id}").status_code == 204
+    with SessionLocal() as db:
+        assert db.execute(select(func.count()).select_from(Address)).scalar_one() == 0
 
 
 def test_root_lists_entrypoints(client):

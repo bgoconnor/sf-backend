@@ -2,8 +2,9 @@ import base64
 import binascii
 import re
 from datetime import datetime, timezone
+from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field, computed_field, field_validator
 
 
 MAX_PHOTO_BYTES = 2 * 1024 * 1024
@@ -45,8 +46,34 @@ def _validate_photo_data_url(value: str | None) -> str | None:
     return value
 
 
+class AddressType(StrEnum):
+    HOME = "Home"
+    WORK = "Work"
+    OTHER = "Other"
+
+
+class AddressInput(BaseModel):
+    type: AddressType = Field(
+        validation_alias=AliasChoices("type", "address_type"),
+        description="Address category: Home, Work, or Other.",
+    )
+    street_address: str = Field(min_length=1, max_length=300, description="Street and unit or suite.")
+    city: str | None = Field(default=None, max_length=120, description="City or locality.")
+    state: str | None = Field(default=None, max_length=120, description="State, province, or region.")
+    postal_code: str | None = Field(default=None, max_length=20, description="Postal or ZIP code.")
+    country: str | None = Field(default=None, max_length=120, description="Country name.")
+
+
+class AddressRead(AddressInput):
+    id: int = Field(description="Server-assigned address identifier.")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ContactBase(BaseModel):
     """Fields shared by every contact request and response."""
+
+    model_config = ConfigDict(extra="forbid")
 
     first_name: str = Field(
         min_length=1,
@@ -86,26 +113,10 @@ class ContactBase(BaseModel):
         description="Role held at the company.",
         examples=["Mathematician"],
     )
-    address: str | None = Field(
-        default=None,
-        max_length=300,
-        description="Street address, including unit or suite.",
-        examples=["1 Market St, Suite 400"],
+    addresses: list[AddressInput] = Field(
+        default_factory=list,
+        description="Ordered addresses. On POST/PUT this array fully defines the relationship.",
     )
-    city: str | None = Field(default=None, max_length=120, description="City or locality.", examples=["San Francisco"])
-    state: str | None = Field(
-        default=None,
-        max_length=120,
-        description="State, province, or region.",
-        examples=["CA"],
-    )
-    postal_code: str | None = Field(
-        default=None,
-        max_length=20,
-        description="Postal or ZIP code.",
-        examples=["94105"],
-    )
-    country: str | None = Field(default=None, max_length=120, description="Country name.", examples=["USA"])
     notes: str | None = Field(
         default=None,
         description="Free-form notes about the contact. No length limit.",
@@ -128,11 +139,16 @@ _FULL_EXAMPLE = {
     "phone": "+1-415-555-0101",
     "company": "Analytical Engines",
     "job_title": "Mathematician",
-    "address": "1 Market St, Suite 400",
-    "city": "San Francisco",
-    "state": "CA",
-    "postal_code": "94105",
-    "country": "USA",
+    "addresses": [
+        {
+            "type": "Work",
+            "street_address": "1 Market St, Suite 400",
+            "city": "San Francisco",
+            "state": "CA",
+            "postal_code": "94105",
+            "country": "USA",
+        }
+    ],
     "notes": "Met at the SF hackathon.",
 }
 _MINIMAL_EXAMPLE = {"first_name": "Grace", "last_name": "Hopper", "email": "grace@example.com"}
@@ -182,11 +198,10 @@ class ContactUpdate(BaseModel):
     phone: str | None = Field(default=None, max_length=40, description="New phone number.")
     company: str | None = Field(default=None, max_length=200, description="New company.")
     job_title: str | None = Field(default=None, max_length=200, description="New job title.")
-    address: str | None = Field(default=None, max_length=300, description="New street address.")
-    city: str | None = Field(default=None, max_length=120, description="New city.")
-    state: str | None = Field(default=None, max_length=120, description="New state or region.")
-    postal_code: str | None = Field(default=None, max_length=20, description="New postal code.")
-    country: str | None = Field(default=None, max_length=120, description="New country.")
+    addresses: list[AddressInput] | None = Field(
+        default=None,
+        description="Complete replacement address array. Omit to preserve; send [] to clear. Null is invalid.",
+    )
     notes: str | None = Field(default=None, description="New notes; replaces the existing text.")
     photo_data_url: str | None = Field(
         default=None,
@@ -194,6 +209,13 @@ class ContactUpdate(BaseModel):
     )
 
     _photo_is_valid = field_validator("photo_data_url")(_validate_photo_data_url)
+
+    @field_validator("addresses", mode="before")
+    @classmethod
+    def _addresses_not_null(cls, value):
+        if value is None:
+            raise ValueError("Addresses must be an array; omit the field to preserve them")
+        return value
 
 
 class ContactRead(ContactBase):
@@ -215,6 +237,7 @@ class ContactRead(ContactBase):
     )
 
     id: int = Field(description="Server-assigned identifier.", examples=[1])
+    addresses: list[AddressRead] = Field(description="Stored addresses in input order.")
     created_at: datetime = Field(
         description="UTC timestamp of when the contact was created.",
         examples=["2026-08-19T16:22:58.189507Z"],

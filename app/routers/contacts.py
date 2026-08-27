@@ -58,6 +58,7 @@ def create_contact(payload: ContactCreate, db: Session = Depends(get_db)) -> Con
     `first_name`, `last_name`, and `email` are required; every other field is
     optional. The email must be unique — a duplicate (compared case-insensitively)
     is rejected with `409 Conflict` rather than creating a second record.
+    `addresses` is an ordered array and defaults to empty.
     """
     _reject_duplicate_email(db, payload.email)
     return crud.create_contact(db, payload)
@@ -141,6 +142,7 @@ def replace_contact(
     leave out are cleared to `null`. The photo is intentionally different so an
     edit form cannot erase it accidentally: omit `photo_data_url` to preserve
     it, send a new data URL to replace it, or send `null` to remove it.
+    `addresses` is full replacement: omit it or send `[]` to clear all rows.
     """
     contact = _get_or_404(db, contact_id)
     _reject_duplicate_email(db, payload.email, exclude_id=contact_id)
@@ -165,7 +167,8 @@ def update_contact(
 
     Fields you omit keep their current value. Re-sending a contact's own email
     address is allowed; using an email that belongs to a different contact
-    returns `409 Conflict`.
+    returns `409 Conflict`. Supplying `addresses` replaces the complete ordered
+    collection; omit it to preserve addresses or send `[]` to clear them.
     """
     contact = _get_or_404(db, contact_id)
     if payload.email is not None:
