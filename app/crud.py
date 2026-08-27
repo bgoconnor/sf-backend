@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -76,6 +78,7 @@ def create_contact(db: Session, payload: ContactCreate) -> Contact:
     data["email"] = _normalize_email(data["email"])
     contact = Contact(**data)
     contact.addresses = _make_addresses(address_data)
+    contact.updated_at = datetime.now(timezone.utc)
     db.add(contact)
     db.commit()
     db.refresh(contact)
@@ -102,6 +105,7 @@ def update_contact(db: Session, contact: Contact, payload: ContactUpdate) -> Con
         setattr(contact, field, _normalize_email(value) if field == "email" else value)
     if address_data is not None:
         contact.addresses = _make_addresses(address_data)
+        contact.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(contact)
     return contact

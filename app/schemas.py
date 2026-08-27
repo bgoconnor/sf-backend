@@ -73,6 +73,8 @@ class AddressRead(AddressInput):
 class ContactBase(BaseModel):
     """Fields shared by every contact request and response."""
 
+    model_config = ConfigDict(extra="forbid")
+
     first_name: str = Field(
         min_length=1,
         max_length=100,

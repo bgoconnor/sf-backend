@@ -199,6 +199,23 @@ def test_patch_preserves_replaces_and_clears_addresses(client, payload):
     assert client.patch(f"{BASE}/{contact_id}", json={"addresses": None}).status_code == 422
 
 
+def test_address_only_patch_updates_contact_timestamp(client, payload):
+    created = client.post(BASE, json=payload).json()
+    response = client.patch(
+        f"{BASE}/{created['id']}",
+        json={"addresses": [{"type": "Work", "street_address": "2 New St"}]},
+    )
+    assert response.status_code == 200
+    assert response.json()["updated_at"] > created["updated_at"]
+
+
+def test_legacy_flat_address_fields_are_rejected(client, payload):
+    payload.pop("addresses")
+    payload["city"] = "San Francisco"
+    response = client.post(BASE, json=payload)
+    assert response.status_code == 422
+
+
 def test_put_replaces_contact(client, payload):
     contact_id = client.post(BASE, json=payload).json()["id"]
     response = client.put(
