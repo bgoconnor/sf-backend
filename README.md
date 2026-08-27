@@ -177,3 +177,5 @@ app/
   routers/contacts.py REST endpoints
 tests/                API tests via FastAPI TestClient
 ```
+
+<!-- Qodo installation verification: remove after the review check completes. -->
