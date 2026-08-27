@@ -120,6 +120,7 @@ class ContactBase(BaseModel):
         examples=["data:image/png;base64,iVBORw0KGgo="],
     )
 
+
 _FULL_EXAMPLE = {
     "first_name": "Ada",
     "last_name": "Lovelace",
