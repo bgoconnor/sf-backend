@@ -1,4 +1,6 @@
 BASE = "/api/v1/contacts"
+PNG_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=="
+JPEG_DATA_URL = "data:image/jpeg;base64,/9j/4AAQSkZJRg=="
 
 
 def test_health(client):
@@ -17,6 +19,34 @@ def test_create_contact(client, payload):
     assert body["email"] == "ada@example.com"
     assert body["full_name"] == "Ada Lovelace"
     assert body["created_at"] and body["updated_at"]
+    assert body["photo_data_url"] is None
+
+
+def test_create_and_read_contact_photo(client, payload):
+    response = client.post(BASE, json={**payload, "photo_data_url": PNG_DATA_URL})
+    assert response.status_code == 201
+    contact_id = response.json()["id"]
+    assert response.json()["photo_data_url"] == PNG_DATA_URL
+    assert client.get(f"{BASE}/{contact_id}").json()["photo_data_url"] == PNG_DATA_URL
+
+
+def test_rejects_unsupported_or_mismatched_photo(client, payload):
+    unsupported = client.post(
+        BASE,
+        json={**payload, "photo_data_url": "data:image/gif;base64,R0lGODlhAQABAAAAACw="},
+    )
+    assert unsupported.status_code == 422
+
+    mismatched = client.post(BASE, json={**payload, "photo_data_url": JPEG_DATA_URL.replace("jpeg", "png")})
+    assert mismatched.status_code == 422
+
+
+def test_rejects_oversized_photo(client, payload):
+    import base64
+
+    oversized = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"x" * (2 * 1024 * 1024)).decode()
+    response = client.post(BASE, json={**payload, "photo_data_url": f"data:image/png;base64,{oversized}"})
+    assert response.status_code == 422
 
 
 def test_create_requires_valid_email(client, payload):
@@ -114,6 +144,22 @@ def test_patch_same_email_is_allowed(client, payload):
     assert response.status_code == 200
 
 
+def test_patch_preserves_replaces_and_removes_photo(client, payload):
+    contact_id = client.post(BASE, json={**payload, "photo_data_url": PNG_DATA_URL}).json()["id"]
+
+    preserved = client.patch(f"{BASE}/{contact_id}", json={"phone": "+1-000-000-0000"})
+    assert preserved.status_code == 200
+    assert preserved.json()["photo_data_url"] == PNG_DATA_URL
+
+    replaced = client.patch(f"{BASE}/{contact_id}", json={"photo_data_url": JPEG_DATA_URL})
+    assert replaced.status_code == 200
+    assert replaced.json()["photo_data_url"] == JPEG_DATA_URL
+
+    removed = client.patch(f"{BASE}/{contact_id}", json={"photo_data_url": None})
+    assert removed.status_code == 200
+    assert removed.json()["photo_data_url"] is None
+
+
 def test_put_replaces_contact(client, payload):
     contact_id = client.post(BASE, json=payload).json()["id"]
     response = client.put(
@@ -124,6 +170,23 @@ def test_put_replaces_contact(client, payload):
     body = response.json()
     assert body["full_name"] == "Grace Hopper"
     assert body["company"] is None  # omitted fields are cleared by PUT
+
+
+def test_put_preserves_replaces_and_removes_photo(client, payload):
+    contact_id = client.post(BASE, json={**payload, "photo_data_url": PNG_DATA_URL}).json()["id"]
+    replacement = {"first_name": "Grace", "last_name": "Hopper", "email": "grace@example.com"}
+
+    preserved = client.put(f"{BASE}/{contact_id}", json=replacement)
+    assert preserved.status_code == 200
+    assert preserved.json()["photo_data_url"] == PNG_DATA_URL
+
+    replaced = client.put(f"{BASE}/{contact_id}", json={**replacement, "photo_data_url": JPEG_DATA_URL})
+    assert replaced.status_code == 200
+    assert replaced.json()["photo_data_url"] == JPEG_DATA_URL
+
+    removed = client.put(f"{BASE}/{contact_id}", json={**replacement, "photo_data_url": None})
+    assert removed.status_code == 200
+    assert removed.json()["photo_data_url"] is None
 
 
 def test_put_missing_contact_returns_404(client):

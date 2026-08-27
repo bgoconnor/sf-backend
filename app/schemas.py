@@ -1,6 +1,48 @@
+import base64
+import binascii
+import re
 from datetime import datetime, timezone
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field, field_validator
+
+
+MAX_PHOTO_BYTES = 2 * 1024 * 1024
+MAX_PHOTO_BASE64_CHARS = 4 * ((MAX_PHOTO_BYTES + 2) // 3)
+SUPPORTED_PHOTO_TYPES = ("image/jpeg", "image/png", "image/webp")
+_PHOTO_DATA_URL = re.compile(
+    rf"^data:({'|'.join(re.escape(mime) for mime in SUPPORTED_PHOTO_TYPES)});base64,([A-Za-z0-9+/]*={{0,2}})$"
+)
+
+
+def _validate_photo_data_url(value: str | None) -> str | None:
+    if value is None:
+        return None
+
+    match = _PHOTO_DATA_URL.fullmatch(value)
+    if match is None:
+        raise ValueError("Photo must be a base64 data URL for a JPEG, PNG, or WebP image")
+
+    mime_type, encoded = match.groups()
+    if len(encoded) > MAX_PHOTO_BASE64_CHARS:
+        raise ValueError("Photo must be 2 MiB or smaller")
+    try:
+        image = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("Photo contains invalid base64 data") from exc
+
+    if not image:
+        raise ValueError("Photo must not be empty")
+    if len(image) > MAX_PHOTO_BYTES:
+        raise ValueError("Photo must be 2 MiB or smaller")
+
+    signatures = {
+        "image/jpeg": image.startswith(b"\xff\xd8\xff"),
+        "image/png": image.startswith(b"\x89PNG\r\n\x1a\n"),
+        "image/webp": len(image) >= 12 and image.startswith(b"RIFF") and image[8:12] == b"WEBP",
+    }
+    if not signatures[mime_type]:
+        raise ValueError(f"Photo content does not match its declared {mime_type} type")
+    return value
 
 
 class ContactBase(BaseModel):
@@ -69,6 +111,14 @@ class ContactBase(BaseModel):
         description="Free-form notes about the contact. No length limit.",
         examples=["Met at the SF hackathon."],
     )
+    photo_data_url: str | None = Field(
+        default=None,
+        description=(
+            "Optional complete base64 data URL for a JPEG, PNG, or WebP image. "
+            "Decoded image content is limited to 2 MiB."
+        ),
+        examples=["data:image/png;base64,iVBORw0KGgo="],
+    )
 
 
 _FULL_EXAMPLE = {
@@ -93,6 +143,8 @@ class ContactCreate(ContactBase):
 
     model_config = ConfigDict(json_schema_extra={"examples": [_FULL_EXAMPLE, _MINIMAL_EXAMPLE]})
 
+    _photo_is_valid = field_validator("photo_data_url")(_validate_photo_data_url)
+
 
 class ContactReplace(ContactBase):
     """
@@ -103,6 +155,8 @@ class ContactReplace(ContactBase):
     """
 
     model_config = ConfigDict(json_schema_extra={"examples": [_FULL_EXAMPLE]})
+
+    _photo_is_valid = field_validator("photo_data_url")(_validate_photo_data_url)
 
 
 class ContactUpdate(BaseModel):
@@ -134,6 +188,12 @@ class ContactUpdate(BaseModel):
     postal_code: str | None = Field(default=None, max_length=20, description="New postal code.")
     country: str | None = Field(default=None, max_length=120, description="New country.")
     notes: str | None = Field(default=None, description="New notes; replaces the existing text.")
+    photo_data_url: str | None = Field(
+        default=None,
+        description="New photo data URL. Send null to remove it; omit it to preserve the current photo.",
+    )
+
+    _photo_is_valid = field_validator("photo_data_url")(_validate_photo_data_url)
 
 
 class ContactRead(ContactBase):

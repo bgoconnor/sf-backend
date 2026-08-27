@@ -71,6 +71,8 @@ def create_contact(db: Session, payload: ContactCreate) -> Contact:
 
 def replace_contact(db: Session, contact: Contact, payload: ContactReplace) -> Contact:
     for field, value in payload.model_dump().items():
+        if field == "photo_data_url" and field not in payload.model_fields_set:
+            continue
         setattr(contact, field, _normalize_email(value) if field == "email" else value)
     db.commit()
     db.refresh(contact)
